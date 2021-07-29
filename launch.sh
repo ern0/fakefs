@@ -1,11 +1,6 @@
 #!/bin/bash
 
-MOUNTPOINT=/tmp/fake
+fusermount -u /tmp/fake 2> /dev/null
+mkdir -p /tmp/fake
 
-rm -rf /home/`whoami`/lof
-touch /home/`whoami`/lof
-bash -c "sleep 1; echo --" &
-bash -c "sleep 2; echo lof > $MOUNTPOINT/home/`whoami`/lof" &
-
-mkdir -p $MOUNTPOINT
-./fakefs -o debug $MOUNTPOINT
+./fakefs.py . /tmp/fake fakefs.conf
