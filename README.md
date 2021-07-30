@@ -1,13 +1,41 @@
-# fakefs
+# FakeFS - *beta*
 
-Mirrors existing directory with changes described in configuration file (using FUSE)
 
-Tried to tweak FUSE "passthrough" example, but did not work.
+## Brief
 
-Then found a great article about Python implementation:
-https://www.stavros.io/posts/python-fuse-filesystem/
+Mirror existing directory with changes described in configuration file (using FUSE).
 
-Original source code:
+
+## Usage
+
+`fakefs.py <mountpoint> <root> <configfile>`
+
+The configuration file contains lines with one of the commands of `rm`, `mv` or `ln`:
+* `rm <path>`: the specified file will be not accessible on the filsystem
+* `mv <source-path> <target-path>`: the file will be moved to a new path
+* `ln <source-path> <target-path>`: the file will e accessible on the target path as well
+
+Example:
+```
+rm /swapfile
+mv /opt/myapp/bin/myapp /usr/bin/myapp
+ln /usr/bin/ls /usr/bin/ll
+```
+
+Preferred usage: fake the system root dierctory (`/`), then `chroot` to mount point.
+
+Stop mirroring: `fusermount -u <mountpoint>`
+
+
+## Known issues
+
+- Works only for files, not directories
+- Should be rewritten in C/C++
+
+
+## Author
+
+Forked from passthrough example:
 https://github.com/skorokithakis/python-fuse-sample
 
-So, I've added some functionality to this code.
+Thanks for *skorokithakis*!

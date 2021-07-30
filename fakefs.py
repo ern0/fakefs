@@ -26,9 +26,9 @@ class Passthrough(Operations):
     def procConfig(self, config):
 
         self.lineNo = 0
-        self.sourceConfig = {}
-        self.targetConfig = {}
-        self.dirConfig = {}
+        self.configRemoved = {}
+        self.configMoved = {}
+        self.configAdded = {}
 
         with open(config, "rt") as file:
             for line in file:      
@@ -36,12 +36,13 @@ class Passthrough(Operations):
                 self.lineNo += 1
 
                 line = line.strip()
+                if line == "": continue
                 if line[0] == '#': continue
                 items = shlex.split(line)
 
                 try: action = items[0]
                 except IndexError: continue
-                if action not in ("rm", "mv", "ln"):
+                if action not in ("rm", "mv", "ln",):
                     self.fatal(f"invalid action \"{action}\"")                
 
                 try: source = items[1]
@@ -51,12 +52,17 @@ class Passthrough(Operations):
                 except IndexError: target = None
                 if action != "rm" and target is None:
                     self.fatal("missing target")
+              
+                if action in ("rm", "mv",): 
+                    self.configRemoved[source] = None
+
+                if action in("mv", "ln",):
+                    self.configMoved[target] = source
+                    directory = os.path.dirname(target)
+                    if directory not in self.configAdded: 
+                        self.configAdded[directory] = {}
+                    self.configAdded[directory][target] = None
                 
-                self.sourceConfig[source] = (action, target,)
-                if target is not None: self.targetConfig[target] = (action, source,)
-
-            print(self.dirConfig)
-
 
     # Helpers
     # =======
@@ -66,48 +72,45 @@ class Passthrough(Operations):
         path = os.path.join(self.root, partial)
         
         return path
-    
 
+    
     def fake(self, path):
 
-        print(path)
+        if path in self.configRemoved: 
+            path = "/...not.found..."
 
-        if path in self.sourceConfig:
-            (command, target) = self.sourceConfig[path]
-            if command == "rm": return None
-            elif command == "mv": return None
-            elif command == "ln": pass
-
-        if path in self.targetConfig:
-            (command, source) = self.sourceConfig[path]
-            if command == "rm": self.fatal("internal error")
-            if command == "mv": return source
-            if command == "ln": return source
-
+        if path in self.configMoved: 
+            path = self.configMoved[path]
+        
         return path
 
+    
 
     # Filesystem methods
     # ==================
 
 
     def access(self, path, mode):
+        path = self.fake(path)
         full_path = self._full_path(path)
         if not os.access(full_path, mode):
             raise FuseOSError(errno.EACCES)
 
 
     def chmod(self, path, mode):
+        path = self.fake(path)
         full_path = self._full_path(path)
         return os.chmod(full_path, mode)
 
 
     def chown(self, path, uid, gid):
+        path = self.fake(path)
         full_path = self._full_path(path)
         return os.chown(full_path, uid, gid)
 
 
-    def getattr(self, path, fh=None):
+    def getattr(self, ppath, fh=None):
+        path = self.fake(ppath)
         full_path = self._full_path(path)
         st = os.lstat(full_path)
         return dict((key, getattr(st, key)) for key in ('st_atime', 'st_ctime',
@@ -115,27 +118,28 @@ class Passthrough(Operations):
 
 
     def readdir(self, path, fh):
+        
         full_path = self._full_path(path)
 
-        dirents = ['.', '..']
+        dirents = [".", ".."]
         if os.path.isdir(full_path):
             dirents.extend(os.listdir(full_path))
+        
+        dirname = os.path.dirname(path)
+        if dirname in self.configAdded:
+            for entry in self.configAdded[dirname]:
+                dirents.append(entry)
 
-        # TODO: append files which copied or moved to this directory
-        print("directory: " + path)
-        print(dirents)
-
-        for entry in dirents:            
-
-            fullEntry = (path + entry)
-            fullEntry = self.fake(fullEntry)
-            if fullEntry is None: continue
+        for entry in dirents:  
+            fullEntry = (path + "/" + entry)            
+            if fullEntry in self.configRemoved: continue
 
             entry = os.path.basename(fullEntry)
             yield entry
 
 
     def readlink(self, path):
+        path = self.fake(path)
         pathname = os.readlink(self._full_path(path))
         if pathname.startswith("/"):
             # Path name is absolute, sanitize it.
@@ -149,6 +153,7 @@ class Passthrough(Operations):
 
 
     def rmdir(self, path):
+        path = self.fake(path)
         full_path = self._full_path(path)
         return os.rmdir(full_path)
 
@@ -158,6 +163,7 @@ class Passthrough(Operations):
 
 
     def statfs(self, path):
+        path = self.fake(path)
         full_path = self._full_path(path)
         stv = os.statvfs(full_path)
         return dict((key, getattr(stv, key)) for key in ('f_bavail', 'f_bfree',
@@ -166,6 +172,7 @@ class Passthrough(Operations):
 
 
     def unlink(self, path):
+        path = self.fake(path)
         return os.unlink(self._full_path(path))
 
 
@@ -182,6 +189,7 @@ class Passthrough(Operations):
 
 
     def utimens(self, path, times=None):
+        path = self.fake(path)
         return os.utime(self._full_path(path), times)
 
 
@@ -189,10 +197,7 @@ class Passthrough(Operations):
     # ============
 
     def open(self, path, flags):
-
         path = self.fake(path)
-        if path is None: return os.open("/_not_found", flags)
-
         full_path = self._full_path(path)
         return os.open(full_path, flags)
 
@@ -231,7 +236,7 @@ class Passthrough(Operations):
 
 
 def main(mountpoint, root, config):
-    FUSE(Passthrough(root, config), mountpoint, nothreads=True, foreground=True)
+    FUSE(Passthrough(root, config), mountpoint, nothreads=True, foreground=(mountpoint == "/tmp/fake"))
 
 
 if __name__ == '__main__':
